@@ -1,1 +1,78 @@
-
+import os
+import psutil
+import time
+import datetime
+import sqlite3
+import getpass
+import threading
+# --- CONFIGURATION ---
+SENSITIVE_DIRS = ["C:/Users/Public/Documents", "C:/ImportantData"]
+WORK_HOURS = (9, 18)
+DB_FILE = "insider_threat_logs.db"
+# --- DATABASE SETUP ---
+def setup_db():
+ conn = sqlite3.connect(DB_FILE)
+ cursor = conn.cursor()
+ cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
+ timestamp TEXT,
+ username TEXT,
+ event_type TEXT,
+ details TEXT)''')
+ conn.commit()
+ conn.close()
+# --- LOGGING FUNCTION ---
+def log_event(event_type, details):
+ conn = sqlite3.connect(DB_FILE)
+ cursor = conn.cursor()
+ cursor.execute("INSERT INTO logs VALUES (?, ?, ?, ?)",
+ (datetime.datetime.now().isoformat(),
+ getpass.getuser(),
+ event_type,
+ details))
+ conn.commit()
+ conn.close()
+# --- FILE ACCESS MONITORING ---
+def monitor_file_access():
+ for dir_path in SENSITIVE_DIRS:
+ if os.path.exists(dir_path):
+ for root, dirs, files in os.walk(dir_path):
+ for file in files:
+ path = os.path.join(root, file)
+ try:
+ access_time = os.path.getatime(path)
+ if time.time() - access_time < 60:
+ log_event("File Access", f"Accessed: {path}")
+ except Exception:
+ pass
+# --- OFF-HOURS DETECTION ---
+def monitor_working_hours():
+ current_hour = datetime.datetime.now().hour
+ if current_hour < WORK_HOURS[0] or current_hour >= WORK_HOURS[1]:
+ log_event("Off-hour Access", f"Accessed system at {current_hour}:00")
+# --- USB DEVICE MONITORING ---
+def monitor_usb_devices():
+ drives = [d.device for d in psutil.disk_partitions() if 'removable' in d.opts]
+ for drive in drives:
+ log_event("USB Inserted", f"Drive: {drive}")
+# --- SUSPICIOUS PROCESS MONITORING ---
+def monitor_suspicious_processes():
+ suspicious = ["cmd.exe", "powershell.exe", "taskkill.exe"]
+ for proc in psutil.process_iter(['pid', 'name']):
+ try:
+ if proc.info['name'].lower() in suspicious:
+ log_event("Suspicious Process",
+ f"Process: {proc.info['name']} (PID: {proc.info['pid']})")
+ except (psutil.NoSuchProcess, psutil.AccessDenied):
+ continue
+# --- MAIN MONITORING LOOP ---
+def start_monitoring():
+ setup_db()
+ while True:
+ monitor_file_access()
+ monitor_working_hours()
+ monitor_usb_devices()
+ monitor_suspicious_processes()
+ time.sleep(60)
+# --- PROGRAM START ---
+if __name__ == "__main__":
+ threading.Thread(target=start_monitoring).start()
